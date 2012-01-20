@@ -1,0 +1,537 @@
+options
+{
+  //JDK_VERSION = "1.5";
+  STATIC = false;
+}
+
+PARSER_BEGIN(MiniJava)
+public class MiniJava
+{
+  public static compiler.GlobalSymbolTable globalSymTbl = new compiler.GlobalSymbolTable();
+  
+  public static void main(String args []) throws Exception
+  {
+    MiniJava parser = new MiniJava(System.in);
+    try
+    {
+      System.out.println("\tORG 0");
+      System.out.println(parser.program(globalSymTbl));
+      System.out.println("\tHALT");
+      System.out.println("");
+      System.out.println(globalSymTbl.generateFunctions());
+      System.out.println("");
+      System.out.println(globalSymTbl.generateVariableTable());
+      System.out.println("\tEND");
+    }
+    catch(Exception e)
+    {
+      e.printStackTrace();
+    }
+  }
+}
+PARSER_END(MiniJava)
+
+SKIP :
+{
+  " "
+| "\r"
+| "\t"
+| "\n"
+}
+
+TOKEN :
+{
+  < FINAL : "final" >
+| < INT : "int" >
+| < PRINT : "print" >
+| < IF : "if" >
+| < WHILE : "while" >
+| < ELSE : "else" >
+| < VOID : "void" >
+| < FUNC : "func" >
+| < RETURN : "return" >
+| < compOp : "!=" | "==" | "<=" | ">=" | ">" | "<" >
+| < NUMBER : ("0" | ["1"-"9"] (["0"-"9"])*) >
+| < IDENT : (["a"-"z"] (["a"-"z"] | ["A"-"Z"] | ["0"-"9"])*) >
+}
+
+String program(compiler.GlobalSymbolTable globalSymTbl) throws Exception :
+{
+	String instructions = "";
+}
+{
+  (    constDecl(globalSymTbl)
+  	varDecl(globalSymTbl)
+  	(procedure(globalSymTbl))*
+  	(function(globalSymTbl))*
+  	instructions = statement(globalSymTbl)
+  	<EOF>
+  )
+  {	return instructions;
+  }
+}
+
+void constDecl(compiler.ISymbolTable symTbl) throws Exception :
+{}
+{
+  (
+    <FINAL> <INT> constZuw(symTbl) constList(symTbl) ";"
+  )?
+}
+
+void constZuw(compiler.ISymbolTable symTbl) throws Exception :
+{
+  Token constName;
+  Token constValue;
+}
+{
+  (constName=<IDENT> "=" constValue=<NUMBER>)
+  {    symTbl.addConstant(constName.image, constValue.image);
+  }
+}
+
+void constList(compiler.ISymbolTable symTbl) throws Exception :
+{}
+{
+  (
+    "," constZuw(symTbl) constList(symTbl)
+  )?
+}
+
+void varDecl(compiler.ISymbolTable symTbl) throws Exception :
+{
+  Token varName;
+  String varValue;
+}
+{
+  (
+    (<INT> varName=<IDENT> varValue=varZuw())
+    {
+      symTbl.addVariable(varName.image, varValue);
+  	}
+
+    varList(symTbl) ";"
+  )?
+}
+
+String varZuw() throws Exception :
+{
+  Token varValue = null;
+}
+{
+  (
+    "=" varValue=<NUMBER>
+  )?
+  {    if(varValue == null)
+      return "0";
+    else
+      return varValue.image;
+  }
+}
+
+void varList(compiler.ISymbolTable symTbl) throws Exception :
+{
+  Token varName;
+  String varValue;
+}
+{
+  (
+    ","
+    (varName=<IDENT> varValue=varZuw())
+    {
+      symTbl.addVariable(varName.image, varValue);    }
+    varList(symTbl)
+  )?
+}
+
+void procedure(compiler.GlobalSymbolTable symTbl) throws Exception :
+{
+  Token procName;
+  compiler.FunctionSymbolTable procSymTbl = new compiler.FunctionSymbolTable(globalSymTbl);
+  String procBlock = "";}
+{  (    <VOID>
+  	procName=<IDENT>
+  	{
+  	  symTbl.addProcedure(procName.image, procSymTbl);  	}
+    "(" routinenParameter(procSymTbl) ")"
+    "{"
+      procBlock=routinenBlock(procSymTbl)
+    "}"
+  )
+  {
+    String code = "\tMOV TOS, R7\n" +
+				  "\tMOV R7, SSP\n" +
+				  "\tSUB SSP, " + procSymTbl.getLocalVariableCount() + "\n" +
+				  procSymTbl.getLocalVariableInitCode() +
+				  procBlock +
+				  "\tMOV SSP, R7\n" +
+				  "\tMOV R7, TOS\n" +
+				  "\tRET\n";
+	
+	symTbl.setFunctionCode(procName.image, code);
+  }
+}
+
+void function(compiler.GlobalSymbolTable symTbl) throws Exception :
+{
+  Token funcName;
+  compiler.FunctionSymbolTable funcSymTbl = new compiler.FunctionSymbolTable(globalSymTbl);
+  String funcBlock = "";
+  String retvalBlock;}
+{
+  <FUNC>
+  funcName=<IDENT>
+  {
+    symTbl.addFunction(funcName.image, funcSymTbl);  }
+  "(" routinenParameter(funcSymTbl) ")"
+  "{"
+  	funcBlock=routinenBlock(funcSymTbl)
+  	<RETURN> retvalBlock=expression(funcSymTbl) ";"
+  "}"
+  {
+    String code = "\tMOV TOS, R7\n" +
+				  "\tMOV R7, SSP\n" +
+				  "\tSUB SSP, " + funcSymTbl.getLocalVariableCount() + "\n" +
+				  funcSymTbl.getLocalVariableInitCode() +
+				  funcBlock +
+				  retvalBlock +
+				  "\tMOV R6, TOS\n" +
+				  "\tMOV SSP, R7\n" +
+				  "\tMOV R7, TOS\n" +
+				  "\tRET\n";
+	symTbl.setFunctionCode(funcName.image, code);  }}
+
+void routinenParameter(compiler.FunctionSymbolTable symTbl) throws Exception :
+{
+  Token parameterName;}
+{
+  (    <INT> parameterName=<IDENT>
+    {
+      symTbl.addParameter(parameterName.image);    }
+
+    routinenParameterList(symTbl)
+  )?}
+
+void routinenParameterList(compiler.FunctionSymbolTable symTbl) throws Exception :
+{
+  Token parameterName;}{
+  (    "," <INT> parameterName=<IDENT>
+    {	  symTbl.addParameter(parameterName.image);
+    }
+    
+    routinenParameterList(symTbl)
+  )?}
+
+String routinenBlock(compiler.ISymbolTable symTbl) throws Exception :
+{
+  String tmp = "";
+  String code = "";}
+{
+  constDecl(symTbl)
+  varDecl(symTbl)
+  (    (
+      tmp=statement(symTbl)
+	  {
+        code+=tmp;
+      }
+    )*
+  )
+  {	return code;
+  }}
+
+String expression(compiler.ISymbolTable symTbl) throws Exception :
+{
+  String termSeq = "";
+  String sumSeq = "";
+} 
+{
+  termSeq = term(symTbl)
+  sumSeq = summe(symTbl)
+  {    return termSeq + sumSeq;
+  }
+}
+
+String summe(compiler.ISymbolTable symTbl) throws Exception :
+{
+    String termSeq = "";
+    String sumSeq = "";
+}
+{
+  (
+    ("+" termSeq=term(symTbl) sumSeq=summe(symTbl))
+    {
+      return
+      	termSeq +
+      	sumSeq +
+        "\tMOV R1, TOS\n" +
+        "\tMOV R0, TOS\n" +
+        "\tADD R0, R1\n" +
+        "\tMOV TOS, R0\n";
+    }
+  |
+    ("-" termSeq=term(symTbl) sumSeq=summe(symTbl))
+    {
+      return
+      	termSeq +
+      	sumSeq +
+        "\tMOV R1, TOS\n" +
+        "\tMOV R0, TOS\n" +
+        "\tSUB R0, R1\n" +
+        "\tMOV TOS, R0\n";
+    }
+  )?
+  {
+    return "";
+  }
+}
+
+String term(compiler.ISymbolTable symTbl) throws Exception :
+{
+	String faktorSeq = "";
+	String produktSeq = "";
+}
+{
+  faktorSeq = faktor(symTbl)
+  produktSeq = produkt(symTbl)
+  {    return faktorSeq + produktSeq;
+  }
+}
+
+String produkt(compiler.ISymbolTable symTbl) throws Exception :
+{
+	String faktorSeq = "";
+	String produktSeq = "";
+}
+{
+  (
+    ("*" faktorSeq=faktor(symTbl) produktSeq=produkt(symTbl))
+    {
+      return
+      	faktorSeq +
+      	produktSeq +
+      	"\tMOV R1, TOS\n" +
+      	"\tMOV R0, TOS\n" +
+      	"\tMUL R0, R1\n" +
+      	"\tMOV TOS, R0\n";    }
+  |
+    ("/" faktorSeq=faktor(symTbl) produktSeq=produkt(symTbl))    {
+      return
+      	faktorSeq +
+      	produktSeq +
+      	"\tMOV R1, TOS\n" +
+      	"\tMOV R0, TOS\n" +
+      	"\tDIV R0, R1\n" +
+      	"\tMOV TOS, R0\n";
+    }
+  )?
+  {    return "";
+  }
+}
+
+String faktor(compiler.ISymbolTable symTbl) throws Exception :
+{
+  Token t;
+  String params=null;
+  String instructionSeq = "";
+  int argumentCounter[] = {0};
+}
+{
+  t=<NUMBER>
+  {
+    return "\tMOV TOS, " + t.image + "\n";  }
+  
+| t=<IDENT> (params=procCall(symTbl, argumentCounter))?
+  {
+    if(symTbl.isVariable(t.image) || symTbl.isConstant(t.image))
+    {      return "\tMOV TOS, " + symTbl.getSymbol(t.image) + "\n";
+	}
+    else if(symTbl.isFunction(t.image))    {
+      int argCount = globalSymTbl.getFunctionSymbolTable(t.image).getParameterCount();
+      if(argumentCounter[0] != argCount)
+      	throw new compiler.WrongParametersException("Function " + t.image + " excpects " + argCount + " parameters. " + argumentCounter[0] + " are given."); 
+
+      instructionSeq += params +
+        				"\tCALL " + symTbl.getSymbol(t.image) + "\n" +
+        				"\tADD SSP, " + argCount + "\n" +
+        				"\tMOV TOS, R6\n";
+      return instructionSeq;    }
+    else
+    	throw new compiler.RValueException("A procedure may not be used in an assignment or as a parameter");  }
+| "(" instructionSeq=expression(symTbl) ")"
+  {    return instructionSeq;
+  }
+}
+
+String condition(String label, compiler.ISymbolTable symTbl) throws Exception:
+{
+	String leftExprSeq = "";
+	String rightExprSeq = "";
+	String compareSeq = "";
+	Token comp;
+}
+{
+  (leftExprSeq=expression(symTbl) comp=<compOp> rightExprSeq=expression(symTbl))
+  {
+    compareSeq += "\tMOV R0, TOS\n";
+    compareSeq += "\tMOV R1, TOS\n";
+
+    if(comp.image.equals("=="))
+    {
+      compareSeq += "\tCMP R1, R0\n";
+      compareSeq += "\tJNZ " + label + "_FALSE\n";
+    }
+    else if(comp.image.equals("!="))
+    {
+      compareSeq += "\tCMP R1, R0\n";
+      compareSeq += "\tJZ " + label + "_FALSE\n";
+    }
+    else if(comp.image.equals("<="))
+    {
+      compareSeq += "\tCMP R1, R0\n";      compareSeq += "\tJGT " + label + "_FALSE\n";
+    }
+    else if(comp.image.equals(">="))
+    {
+      compareSeq += "\tCMP R0, R1\n";
+      compareSeq += "\tJGT " + label + "_FALSE\n";
+    }
+    else if(comp.image.equals(">"))
+    {
+      compareSeq += "\tCMP R0, R1\n";
+      compareSeq += "\tJGE " + label + "_FALSE\n";
+    }
+    else if(comp.image.equals("<"))
+    {
+      compareSeq += "\tCMP R1, R0\n";
+      compareSeq += "\tJGE " + label + "_FALSE\n";
+    }
+    	return leftExprSeq + rightExprSeq + compareSeq;
+  }
+}
+
+String optElse(compiler.ISymbolTable symTbl) throws Exception :
+{
+	String elseStmtSeq = "";
+}
+{
+  (
+    <ELSE> elseStmtSeq=statement(symTbl)
+  )?
+  {    return elseStmtSeq;
+  }
+}
+
+String statement(compiler.ISymbolTable symTbl) throws Exception :
+{
+	String expressionSeq = "";
+	Token variableIdent;
+	String conditionSeq = "";
+	String optElseSeq = "";
+	String labelName = "";
+	String params = "";
+    int argumentCounter[] = {0};
+}
+{
+  (
+    variableIdent=<IDENT>
+    (
+      ("=" expressionSeq=expression(symTbl) ";")
+      {		if(!symTbl.isVariable(variableIdent.image))
+	      throw new compiler.LValueException(variableIdent.image + " is not a variable");
+	    
+		expressionSeq += "\tMOV " + symTbl.getSymbol(variableIdent.image) + ", TOS\n";
+	    return expressionSeq;
+      }
+    | (params=procCall(symTbl, argumentCounter) ";")
+      {
+        int argCount = globalSymTbl.getFunctionSymbolTable(variableIdent.image).getParameterCount();
+        if(argumentCounter[0] != argCount)
+      	  throw new compiler.WrongParametersException("Procedure " + variableIdent.image + " excpects " + argCount + " parameters. " + argumentCounter[0] + " are given.");
+        
+		expressionSeq += params +
+        				"\tCALL " + symTbl.getSymbol(variableIdent.image) + "\n" +
+        				"\tADD SSP, " + argCount + "\n";
+        return expressionSeq;      }
+    )
+  )
+| (<PRINT> "(" expressionSeq = expression(symTbl) ")" ";")
+  {
+    expressionSeq += "\tMOV R0, TOS\n";
+    expressionSeq += "\tPRN R0\n";
+    return expressionSeq;  }
+| ("{" expressionSeq=stmtList(symTbl) "}")
+  {	return expressionSeq;
+  }
+| (
+  	(<IF>) { labelName = compiler.LabelGenerator.generateLabel(); }
+  	conditionSeq=condition(labelName, symTbl)
+  	expressionSeq=statement(symTbl)
+  	optElseSeq=optElse(symTbl)
+  )
+  {
+    return labelName + "\n" +
+           conditionSeq +
+    	   labelName + "_TRUE\n" +
+    	   expressionSeq +
+    	   "\tJMP " + labelName + "_END\n" +
+    	   labelName + "_FALSE\n" +
+    	   optElseSeq +
+    	   labelName + "_END\n";  }
+| (
+  	(<WHILE>) { labelName = compiler.LabelGenerator.generateLabel(); }
+  	conditionSeq=condition(labelName, symTbl)
+  	expressionSeq=statement(symTbl)
+  )
+  {
+    return labelName + "\n" +
+           conditionSeq +
+           labelName + "_TRUE\n" +
+           expressionSeq +
+           "\tJMP " + labelName + "\n" +
+           labelName + "_FALSE\n" +
+           labelName + "_END\n";  }
+}
+
+String stmtList(compiler.ISymbolTable symTbl) throws Exception:
+{
+  String stmt = "";
+  String stmtList = "";
+}
+{
+  (
+    stmt=statement(symTbl)
+    stmtList=stmtList(symTbl)
+  )?
+  {    return stmt + stmtList;
+  }
+}
+
+String procCall(compiler.ISymbolTable symTbl, int[] count) throws Exception:
+{
+  String firstParamCode = "";
+  String otherParamsCode = "";
+}
+{  (    "("
+      (
+        firstParamCode=expression(symTbl)
+        {
+          count[0]++;        }
+        otherParamsCode=callParamList(symTbl, count)
+      )?
+    ")"
+  )
+  {
+    return otherParamsCode + firstParamCode;  }
+}
+
+String callParamList(compiler.ISymbolTable symTbl, int[] count) throws Exception:
+{
+  String firstParamCode = "";
+  String otherParamsCode = "";}{
+  (    ","
+    firstParamCode=expression(symTbl)    {
+      count[0]++;    }
+    otherParamsCode=callParamList(symTbl, count)
+  )?
+  {    return otherParamsCode + firstParamCode;
+  }
+}

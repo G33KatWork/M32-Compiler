@@ -1,0 +1,22 @@
+final int bar = 2;
+int foo=1;
+
+void b(int a, int b)
+{
+  int foo=2;
+  foo=3+4+56;
+  print(a+foo);
+  print(b+foo);
+}
+
+func e(int a, int b)
+{
+  final int d=1;
+  int c=2;
+  return a+b+c+foo+d;
+}
+
+{
+  b(e(123,1),1);
+}
+
